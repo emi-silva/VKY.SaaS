@@ -1,0 +1,305 @@
+// Esquema Prisma para VKY.SaaS
+// Plataforma de Clínicas Médicas
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USUARIOS Y AUTENTICACIÓN
+// ============================================
+
+enum UserRole {
+  ADMIN
+  DOCTOR
+  PATIENT
+  RECEPTIONIST
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  role          UserRole
+  emailVerified Boolean   @default(false)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relaciones
+  patient       Patient?
+  doctor        Doctor?
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// PACIENTES
+// ============================================
+
+model Patient {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  firstName       String
+  lastName        String
+  phone           String?
+  dateOfBirth     DateTime?
+  gender          String?
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?
+  emergencyContact String?
+  emergencyPhone  String?
+  bloodType       String?
+  allergies       String?
+  medicalNotes    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relaciones
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+  medicalRecords  MedicalRecord[]
+  invoices        Invoice[]
+
+  @@map("patients")
+}
+
+// ============================================
+// DOCTORES
+// ============================================
+
+model Doctor {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  firstName     String
+  lastName      String
+  phone         String?
+  specialty     String
+  licenseNumber String   @unique
+  bio           String?
+  consultationFee Float  @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedules     DoctorSchedule[]
+  appointments  Appointment[]
+  medicalRecords MedicalRecord[]
+
+  @@map("doctors")
+}
+
+model DoctorSchedule {
+  id         String   @id @default(cuid())
+  doctorId   String
+  dayOfWeek  Int      // 0-6 (domingo a sábado)
+  startTime  String   // "09:00"
+  endTime    String   // "17:00"
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, dayOfWeek])
+  @@map("doctor_schedules")
+}
+
+// ============================================
+// TURNOS / CITAS
+// ============================================
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentType {
+  IN_PERSON
+  TELEMEDICINE
+}
+
+model Appointment {
+  id          String              @id @default(cuid())
+  patientId   String
+  doctorId    String
+  startTime   DateTime
+  endTime     DateTime
+  type        AppointmentType
+  status      AppointmentStatus  @default(SCHEDULED)
+  reason      String?
+  notes       String?
+  roomUrl     String?             // URL de sala de Twilio para telemedicina
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  // Relaciones
+  patient     Patient             @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor      Doctor              @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  medicalRecord MedicalRecord?
+
+  @@index([doctorId, startTime])
+  @@index([patientId, startTime])
+  @@map("appointments")
+}
+
+// ============================================
+// HISTORIALES MÉDICOS
+// ============================================
+
+model MedicalRecord {
+  id              String   @id @default(cuid())
+  appointmentId   String   @unique
+  patientId       String
+  doctorId        String
+  diagnosis       String
+  symptoms        String?
+  treatment       String?
+  prescription    String?
+  notes           String?
+  attachments     String?  // Array JSON de URLs de archivos
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relaciones
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient     Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor      Doctor      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@map("medical_records")
+}
+
+// ============================================
+// FACTURACIÓN Y FACTURAS
+// ============================================
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  DEBIT_CARD
+  BANK_TRANSFER
+  INSURANCE
+  STRIPE
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  patientId       String
+  appointmentId   String?
+  amount          Float
+  currency        String        @default("USD")
+  status          InvoiceStatus @default(PENDING)
+  description     String?
+  stripeInvoiceId String?
+  paidAt          DateTime?
+  dueAt           DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relaciones
+  patient       Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  payments      Payment[]
+
+  @@map("invoices")
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  invoiceId       String
+  amount          Float
+  currency        String        @default("USD")
+  method          PaymentMethod
+  stripePaymentId String?
+  status          String        @default("succeeded")
+  metadata        String?       // JSON string para datos adicionales
+  createdAt       DateTime      @default(now())
+
+  // Relaciones
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// ============================================
+// NOTIFICACIONES
+// ============================================
+
+enum NotificationType {
+  EMAIL
+  SMS
+  PUSH
+  IN_APP
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  read      Boolean          @default(false)
+  metadata  String?          // JSON string
+  createdAt DateTime         @default(now())
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+// ============================================
+// CONFIGURACIÓN DE LA CLÍNICA
+// ============================================
+
+model Clinic {
+  id              String   @id @default(cuid())
+  name            String
+  email           String?
+  phone           String?
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?
+  country         String   @default("AR")
+  timezone        String   @default("America/Argentina/Buenos_Aires")
+  currency        String   @default("USD")
+  logo            String?
+  website         String?
+  taxId           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("clinics")
+}

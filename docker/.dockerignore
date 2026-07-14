@@ -1,0 +1,13 @@
+# PostgreSQL
+*.sql
+*.sql.gz
+
+# Docker
+docker/data/
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

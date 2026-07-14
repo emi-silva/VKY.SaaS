@@ -1,0 +1,48 @@
+FROM node:20-alpine AS base
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY apps/api/package.json ./apps/api/
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/database/package.json ./packages/database/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY apps/api ./apps/api
+COPY packages/shared ./packages/shared
+COPY packages/database ./packages/database
+COPY tsconfig.base.json ./
+
+# Generate Prisma client
+RUN cd packages/database && pnpm db:generate
+
+# Build shared package
+RUN cd packages/shared && pnpm build
+
+# Build API
+RUN cd apps/api && pnpm build
+
+# Production stage
+FROM node:20-alpine AS production
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy built files
+COPY --from=base /app/apps/api/dist ./dist
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/packages/database/src ./packages/database/src
+COPY --from=base /app/packages/database/prisma ./packages/database/prisma
+COPY --from=base /app/packages/shared/dist ./packages/shared/dist
+
+EXPOSE 3001
+
+CMD ["node", "dist/index.js"]
