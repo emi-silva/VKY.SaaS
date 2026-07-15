@@ -48,3 +48,5 @@ docker/data/
 # Logs
 *.log
 logs/
+
+.vercel
